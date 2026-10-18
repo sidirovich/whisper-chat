@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.zcode/
+out/
+*.tsbuildinfo
+next-env.d.ts.bak
+.env
+.env.*
+npm-debug.log*
