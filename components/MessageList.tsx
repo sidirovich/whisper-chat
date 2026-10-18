@@ -24,7 +24,7 @@ function formatTime(ts: number): string {
 /** Бабл файла: прогресс передачи, кнопка Download, inline-превью небольших картинок. */
 function FileBubble({ item, onCancel }: { item: FileChatItem; onCancel?: (fileId: string) => void }) {
   const inFlight = item.state === 'sending' || item.state === 'receiving';
-  const previewable = item.state === 'ready' && !!item.url && item.mime.startsWith('image/') && item.size <= MAX_PREVIEW_SIZE;
+  const imageUrl = item.mime.startsWith('image/') && item.size <= MAX_PREVIEW_SIZE ? item.url : undefined;
   const status = (() => {
     if (item.failed) {
       if (item.failedReason === 'cancelled') return 'cancelled';
@@ -35,17 +35,66 @@ function FileBubble({ item, onCancel }: { item: FileChatItem; onCancel?: (fileId
     if (item.mine) return 'sent';
     return '';
   })();
+
+  // Картинки: превью во всю ширину бабла, метаданные — плашкой поверх нижнего края.
+  if (imageUrl) {
+    return (
+      <div
+        className={`msg__bubble msg__bubble--image${item.failed ? ' is-failed' : ''}${item.unverified ? ' msg__bubble--unverified' : ''}`}
+      >
+        <a
+          className="msg__file-media"
+          href={imageUrl}
+          target="_blank"
+          rel="noreferrer"
+          title="Open full size"
+          aria-label={`Open ${item.name} full size`}
+        >
+          <img className="msg__file-img" src={imageUrl} alt={item.name} draggable={false} />
+          {inFlight && <span className="msg__file-veil" aria-hidden />}
+        </a>
+        <div className="msg__file-strip">
+          <span className="msg__file-name" title={item.name}>
+            {item.name}
+          </span>
+          <span className="msg__file-sub">
+            {inFlight ? `${Math.round(item.progress * 100)}%` : formatBytes(item.size)}
+            {!inFlight && status ? ` · ${status}` : ''}
+            {!inFlight && item.unverified ? ' · signature unverified' : ''}
+          </span>
+          {inFlight && item.mine && onCancel && (
+            <button type="button" className="msg__file-cancel" onClick={() => onCancel(item.fileId)}>
+              Cancel
+            </button>
+          )}
+          {!inFlight && item.state === 'ready' && !item.mine && (
+            <a className="msg__file-download" href={imageUrl} download={item.name}>
+              <DownloadIcon width={13} height={13} /> Download
+            </a>
+          )}
+          {inFlight && (
+            <div
+              className="msg__file-bar"
+              role="progressbar"
+              aria-valuenow={Math.round(item.progress * 100)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <i style={{ width: `${Math.max(item.progress * 100, 4)}%` }} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`msg__bubble msg__bubble--file${item.failed ? ' is-failed' : ''}${item.unverified ? ' msg__bubble--unverified' : ''}`}
     >
-      {previewable ? (
-        <img className="msg__file-preview" src={item.url} alt={item.name} />
-      ) : (
-        <span className="msg__file-icon">
-          <FileIcon width={22} height={22} />
-        </span>
-      )}
+      <span className="msg__file-icon">
+        <FileIcon width={22} height={22} />
+      </span>
       <div className="msg__file-info">
         <span className="msg__file-name" title={item.name}>
           {item.name}

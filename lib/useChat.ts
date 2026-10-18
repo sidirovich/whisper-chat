@@ -420,6 +420,10 @@ export function useChat(): ChatApi {
       const itemId = nextId();
       const ts = Date.now();
       const mime = file.type || 'application/octet-stream';
+      // Локальное превью для отправляемых картинок — отправитель видит то же, что и получатель.
+      const previewUrl =
+        mime.startsWith('image/') && file.size <= MAX_PREVIEW_SIZE ? URL.createObjectURL(file) : undefined;
+      if (previewUrl) ownedUrlsRef.current.add(previewUrl);
       const meta: FileManifest = {
         fileId,
         name: file.name,
@@ -460,6 +464,7 @@ export function useChat(): ChatApi {
         mime,
         state: 'sending',
         progress: 0,
+        url: previewUrl,
       });
 
       void (async () => {

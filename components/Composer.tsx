@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import EmojiPicker from './EmojiPicker';
 import { CloseIcon, FileIcon, PaperclipIcon, SendIcon, SmileIcon } from './icons';
-import { formatBytes, MAX_FILE_SIZE } from '@/lib/useChat';
+import { formatBytes, MAX_FILE_SIZE, MAX_PREVIEW_SIZE } from '@/lib/useChat';
 
 interface ComposerProps {
   onSend: (text: string) => void;
@@ -20,6 +20,7 @@ export default function Composer({ onSend, onSendFile, onTyping, disabled }: Com
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coarsePointer, setCoarsePointer] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -28,6 +29,17 @@ export default function Composer({ onSend, onSendFile, onTyping, disabled }: Com
   useEffect(() => {
     setCoarsePointer(window.matchMedia('(pointer: coarse)').matches);
   }, []);
+
+  // Миниатюра для картинок в чипе вложения; url живёт, пока файл выбран.
+  useEffect(() => {
+    if (!pendingFile || !pendingFile.type.startsWith('image/') || pendingFile.size > MAX_PREVIEW_SIZE) {
+      setThumbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pendingFile);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pendingFile]);
 
   const resize = useCallback(() => {
     const el = taRef.current;
@@ -102,7 +114,11 @@ export default function Composer({ onSend, onSendFile, onTyping, disabled }: Com
 
       {pendingFile && (
         <div className={`composer__file${fileTooBig ? ' is-too-big' : ''}`}>
-          <FileIcon width={16} height={16} />
+          {thumbUrl ? (
+            <img className="composer__file-thumb" src={thumbUrl} alt="" />
+          ) : (
+            <FileIcon width={16} height={16} />
+          )}
           <span className="composer__file-name">{pendingFile.name}</span>
           <span className="composer__file-size">{formatBytes(pendingFile.size)}</span>
           {fileTooBig && <span className="composer__file-warn">over the {formatBytes(MAX_FILE_SIZE)} limit</span>}
