@@ -139,7 +139,12 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
           </div>
         )}
 
-        <MessageList items={items} inviteUrl={inviteUrl} onCopyInvite={() => void copyInvite()} />
+        <MessageList
+          items={items}
+          inviteUrl={inviteUrl}
+          onCopyInvite={() => void copyInvite()}
+          onCancelFile={chat.cancelFile}
+        />
 
         {members.length === 0 && items.length > 0 && (
           <div className="chat__alone" role="status">
@@ -154,7 +159,7 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
           {typingLabel ?? '\u00A0'}
         </div>
 
-        <Composer onSend={chat.sendText} onTyping={chat.notifyTyping} />
+        <Composer onSend={chat.sendText} onSendFile={chat.sendFile} onTyping={chat.notifyTyping} />
       </div>
 
       <ConfirmModal

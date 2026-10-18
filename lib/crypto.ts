@@ -89,32 +89,67 @@ export async function deriveAesKey(
   );
 }
 
-export async function encryptText(
+export async function encryptBytes(
   key: CryptoKey,
-  plaintext: string,
+  bytes: Uint8Array<ArrayBuffer>,
   aad: string,
 ): Promise<{ iv: string; data: string }> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv, additionalData: encoder.encode(aad) },
     key,
-    encoder.encode(plaintext),
+    bytes,
   );
   return { iv: bufToB64(iv), data: bufToB64(new Uint8Array(ciphertext)) };
 }
 
-export async function decryptText(key: CryptoKey, iv: string, data: string, aad: string): Promise<string> {
+export async function encryptText(
+  key: CryptoKey,
+  plaintext: string,
+  aad: string,
+): Promise<{ iv: string; data: string }> {
+  return encryptBytes(key, encoder.encode(plaintext), aad);
+}
+
+export async function decryptBytes(key: CryptoKey, iv: string, data: string, aad: string): Promise<Uint8Array> {
   const plain = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: b64ToBytes(iv), additionalData: encoder.encode(aad) },
     key,
     b64ToBytes(data),
   );
-  return decoder.decode(plain);
+  return new Uint8Array(plain);
+}
+
+export async function decryptText(key: CryptoKey, iv: string, data: string, aad: string): Promise<string> {
+  return decoder.decode(await decryptBytes(key, iv, data, aad));
+}
+
+/** SHA-256 в hex — контроль целостности файлов по манифесту. */
+export async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** Каноничная строка для подписи/проверки — детерминированная без JSON-сортировки. */
 export function canonicalMessage(roomId: string, from: string, seq: number, ts: number, text: string): string {
   return `v2|${roomId}|${from}|${seq}|${ts}|${text}`;
+}
+
+/** Каноничная строка манифеста файла (подпись доказывает авторство файла). */
+export function canonicalFileOffer(
+  roomId: string,
+  from: string,
+  seq: number,
+  ts: number,
+  fileId: string,
+  name: string,
+  size: number,
+  mime: string,
+  sha256: string,
+  totalChunks: number,
+  chunkSize: number,
+): string {
+  return `v2f|${roomId}|${from}|${seq}|${ts}|${fileId}|${name}|${size}|${mime}|${sha256}|${totalChunks}|${chunkSize}`;
 }
 
 export async function signCanonical(ecdsaPrivate: CryptoKey, canonical: string): Promise<string> {

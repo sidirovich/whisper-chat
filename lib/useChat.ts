@@ -3,19 +3,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from './socket';
 import {
+  canonicalFileOffer,
   canonicalMessage,
+  decryptBytes,
   decryptText,
   deriveAesKey,
+  encryptBytes,
   encryptText,
   generateIdentity,
   jwkFingerprint,
   roomSecretTag,
+  sha256Hex,
   signCanonical,
   verifyCanonical,
   type Identity,
   type PublicKeys,
 } from './crypto';
-import type { ChatItem, IncomingMsgEvent, JoinAck, MemberState, TypingEvent } from './types';
+import type {
+  ChatItem,
+  FileChunkPayload,
+  FileManifest,
+  IncomingFileChunkEvent,
+  IncomingFileOfferEvent,
+  IncomingMsgEvent,
+  JoinAck,
+  MemberState,
+  TypingEvent,
+} from './types';
+
+type FileChatItem = Extract<ChatItem, { kind: 'file' }>;
+
+const textEncoder = new TextEncoder();
 
 export type ConnStatus = 'idle' | 'joining' | 'online' | 'reconnecting';
 
@@ -44,6 +62,8 @@ export interface ChatApi {
   join(roomId: string, name: string, secret?: string | null): Promise<boolean>;
   leave(): void;
   sendText(text: string): void;
+  sendFile(file: File): void;
+  cancelFile(fileId: string): void;
   notifyTyping(isTyping: boolean): void;
   dismissError(): void;
 }
@@ -51,6 +71,75 @@ export interface ChatApi {
 const MAX_ITEMS = 1000;
 const TYPING_TTL = 4000;
 const GHOST_TTL = 30_000; // сколько помним ключи вышедшего (для сообщений «на лету»)
+
+export const MAX_FILE_SIZE = 100 * 1024 * 1024; // всё состояние живёт в RAM — нужен предел
+export const FILE_CHUNK_SIZE = 512 * 1024; // шифротекст чанка в b64 ≈ 683 КБ < 768 КБ серверного потолка
+const FILE_CHUNK_WINDOW = 4; // не-ack-нутых чанков в полёте (flow-control)
+const FILE_ACK_TIMEOUT = 15_000; // ждём ack сервера столько, дальше считаем сбой
+const FILE_RETRY_BACKOFF = 1500; // пауза при отказе 'rate' (серверное окно 10 с)
+const FILE_MAX_ATTEMPTS = 30;
+const FILE_STALL_MS = 20_000; // без чанков столько — передача сорвалась
+export const MAX_PREVIEW_SIZE = 10 * 1024 * 1024; // inline-превью только для небольших картинок
+
+const FILE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Локальное состояние одной передачи файла (только RAM, очищается по завершении). */
+interface FileTransfer {
+  dir: 'send' | 'recv';
+  itemId: string;
+  roomId: string;
+  meta: FileManifest;
+  /** Отправка: id получателей; приём: id отправителя. */
+  peers: string[];
+  /** id сокета-отправителя (AAD чанков и оффера). */
+  fromId: string;
+  ts: number;
+  /** Отправка: содержимое файла целиком (освобождается после передачи). */
+  buf: Uint8Array<ArrayBuffer> | null;
+  /** Приём: расшифрованные чанки по индексам. */
+  chunks: Map<number, Uint8Array>;
+  received: number;
+  acked: number;
+  inFlight: number;
+  nextChunk: number;
+  lastActivity: number;
+  cancelled: boolean;
+}
+
+/** Строгая валидация расшифрованного манифеста — до его использования в арифметике чанков. */
+function isValidManifest(m: unknown): m is FileManifest {
+  if (!m || typeof m !== 'object') return false;
+  const x = m as Record<string, unknown>;
+  return (
+    typeof x.fileId === 'string' && FILE_ID_RE.test(x.fileId) &&
+    typeof x.name === 'string' && x.name.length > 0 && x.name.length <= 256 &&
+    typeof x.size === 'number' && Number.isInteger(x.size) && x.size > 0 &&
+    typeof x.mime === 'string' && x.mime.length <= 128 &&
+    typeof x.sha256 === 'string' && /^[0-9a-f]{64}$/.test(x.sha256) &&
+    typeof x.chunkSize === 'number' && Number.isInteger(x.chunkSize) && x.chunkSize > 0 && x.chunkSize <= 1024 * 1024 &&
+    typeof x.totalChunks === 'number' && Number.isInteger(x.totalChunks) && x.totalChunks > 0 && x.totalChunks <= 4096 &&
+    Math.ceil((x.size as number) / (x.chunkSize as number)) === x.totalChunks
+  );
+}
+
+/** Непрозрачный id файла: 24 hex-символа. */
+function makeFileId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Человекочитаемый размер файла. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let v = n;
+  let u = -1;
+  do {
+    v /= 1024;
+    u++;
+  } while (v >= 1024 && u < units.length - 1);
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[u]}`;
+}
 
 let itemSeq = 0;
 const nextId = () => `${Date.now().toString(36)}${(itemSeq++).toString(36)}`;
@@ -90,6 +179,10 @@ export function useChat(): ChatApi {
   /** имя -> отпечаток: детекция подмены ключей под видом того же человека. */
   const nameFpRef = useRef(new Map<string, string>());
   const lastTypingSentRef = useRef(0);
+  /** Активные передачи файлов (оба направления), ключ — fileId. */
+  const fileTxRef = useRef(new Map<string, FileTransfer>());
+  /** Object URL готовых файлов — revoke при выходе из чата. */
+  const ownedUrlsRef = useRef(new Set<string>());
 
   const applyRoom = useCallback((next: RoomInfo | null) => {
     roomRef.current = next;
@@ -106,6 +199,10 @@ export function useChat(): ChatApi {
       const base = prev.length >= MAX_ITEMS ? prev.slice(prev.length - MAX_ITEMS + 1) : prev;
       return [...base, item];
     });
+  }, []);
+
+  const patchFileItem = useCallback((id: string, patch: (f: FileChatItem) => FileChatItem) => {
+    setItems((prev) => prev.map((it) => (it.id === id && it.kind === 'file' ? patch(it) : it)));
   }, []);
 
   // --- генерация ключей один раз на вкладку --------------------------------
@@ -204,7 +301,220 @@ export function useChat(): ChatApi {
     [applyMembers],
   );
 
-  // --- чистка «призраков» и протухших индикаторов набора -------------------
+  // --- передача файлов ------------------------------------------------------
+  /** Помечаем передачу сорванной и освобождаем её буферы. */
+  const failFileTransfer = useCallback(
+    (t: FileTransfer, reason: 'cancelled' | 'integrity' | 'interrupted') => {
+      if (fileTxRef.current.get(t.meta.fileId) === t) fileTxRef.current.delete(t.meta.fileId);
+      t.cancelled = true;
+      t.chunks.clear();
+      t.buf = null;
+      patchFileItem(t.itemId, (f) => ({ ...f, state: 'failed', failed: true, failedReason: reason }));
+    },
+    [patchFileItem],
+  );
+
+  /**
+   * Отправитель: окно из FILE_CHUNK_WINDOW не-ack-нутых чанков. Ack от сервера
+   * подтверждает релей (не получение) — этого хватает для flow-control и прогресса.
+   * Отказ 'rate' — ретрай с паузой; прочие — передача сорвана.
+   */
+  const pumpFileChunks = useCallback(
+    (t: FileTransfer) => {
+      const socket = getSocket();
+      while (!t.cancelled && t.inFlight < FILE_CHUNK_WINDOW && t.nextChunk < t.meta.totalChunks) {
+        const index = t.nextChunk++;
+        t.inFlight++;
+        void (async () => {
+          try {
+            const off = index * t.meta.chunkSize;
+            const plain = t.buf!.subarray(off, Math.min(off + t.meta.chunkSize, t.meta.size));
+            const chunkAad = `${t.roomId}|${t.fromId}|${t.meta.fileId}|${index}`;
+            const payloads = await Promise.all(
+              t.peers.map(async (to): Promise<FileChunkPayload> => {
+                const key = await keyFor(to);
+                const { iv, data } = await encryptBytes(key, plain, chunkAad);
+                return { to, fileId: t.meta.fileId, index, iv, data };
+              }),
+            );
+            if (t.cancelled) return;
+
+            for (const p of payloads) {
+              let delivered = false;
+              for (let attempt = 0; attempt < FILE_MAX_ATTEMPTS && !t.cancelled; attempt++) {
+                const res = await new Promise<{ ok?: boolean; reason?: string } | null>((resolve) => {
+                  const timer = window.setTimeout(() => resolve(null), FILE_ACK_TIMEOUT);
+                  socket.emit('file:chunk', p, (ack: { ok?: boolean; reason?: string } | null) => {
+                    window.clearTimeout(timer);
+                    resolve(ack ?? null);
+                  });
+                });
+                if (res?.ok) {
+                  delivered = true;
+                  break;
+                }
+                if (res && res.reason && res.reason !== 'rate') break; // постоянный отказ сервера
+                await new Promise((resolve) => window.setTimeout(resolve, FILE_RETRY_BACKOFF));
+              }
+              if (!delivered) {
+                failFileTransfer(t, 'interrupted');
+                return;
+              }
+            }
+            if (t.cancelled) return;
+
+            t.acked++;
+            t.lastActivity = Date.now();
+            patchFileItem(t.itemId, (f) => ({
+              ...f,
+              progress: Math.min(t.acked / t.meta.totalChunks, 1),
+            }));
+          } catch {
+            failFileTransfer(t, 'interrupted');
+            return;
+          } finally {
+            t.inFlight--;
+          }
+
+          if (t.acked >= t.meta.totalChunks) {
+            patchFileItem(t.itemId, (f) => ({ ...f, state: 'ready', progress: 1 }));
+            t.buf = null; // ~100 МБ больше не нужны
+            fileTxRef.current.delete(t.meta.fileId);
+          } else {
+            pumpFileChunks(t);
+          }
+        })();
+      }
+    },
+    [failFileTransfer, keyFor, patchFileItem],
+  );
+
+  const sendFile = useCallback(
+    (file: File) => {
+      const r = roomRef.current;
+      const idt = identityRef.current;
+      if (!r || !idt) return;
+      const targets = membersRef.current.map((m) => m.id);
+      if (targets.length === 0) {
+        pushItem({
+          id: nextId(),
+          kind: 'system',
+          ts: Date.now(),
+          text: 'There is nobody to send the file to yet — invite someone first.',
+          tone: 'warn',
+        });
+        return;
+      }
+      if (file.size === 0 || file.size > MAX_FILE_SIZE) {
+        pushItem({
+          id: nextId(),
+          kind: 'system',
+          ts: Date.now(),
+          text: `File is too large — the limit is ${formatBytes(MAX_FILE_SIZE)}.`,
+          tone: 'warn',
+        });
+        return;
+      }
+
+      const fileId = makeFileId();
+      const itemId = nextId();
+      const ts = Date.now();
+      const mime = file.type || 'application/octet-stream';
+      const meta: FileManifest = {
+        fileId,
+        name: file.name,
+        size: file.size,
+        mime,
+        sha256: '',
+        chunkSize: FILE_CHUNK_SIZE,
+        totalChunks: Math.max(1, Math.ceil(file.size / FILE_CHUNK_SIZE)),
+      };
+      const t: FileTransfer = {
+        dir: 'send',
+        itemId,
+        roomId: r.roomId,
+        meta,
+        peers: targets,
+        fromId: r.selfId,
+        ts,
+        buf: null,
+        chunks: new Map(),
+        received: 0,
+        acked: 0,
+        inFlight: 0,
+        nextChunk: 0,
+        lastActivity: Date.now(),
+        cancelled: false,
+      };
+      fileTxRef.current.set(fileId, t);
+      pushItem({
+        id: itemId,
+        kind: 'file',
+        mine: true,
+        senderId: r.selfId,
+        senderName: r.name,
+        ts,
+        fileId,
+        name: file.name,
+        size: file.size,
+        mime,
+        state: 'sending',
+        progress: 0,
+      });
+
+      void (async () => {
+        try {
+          const buf = new Uint8Array(await file.arrayBuffer());
+          const sha256 = await sha256Hex(buf);
+          if (t.cancelled || fileTxRef.current.get(fileId) !== t) return;
+          t.buf = buf;
+          t.meta.sha256 = sha256;
+
+          const seq = outSeqRef.current++;
+          const sig = await signCanonical(
+            idt.ecdsaPrivate,
+            canonicalFileOffer(
+              r.roomId,
+              r.selfId,
+              seq,
+              ts,
+              fileId,
+              meta.name,
+              meta.size,
+              mime,
+              sha256,
+              meta.totalChunks,
+              meta.chunkSize,
+            ),
+          );
+          const offerAad = `${r.roomId}|${r.selfId}|${seq}|offer`;
+          const payloads = await Promise.all(
+            targets.map(async (to) => {
+              const key = await keyFor(to);
+              const { iv, data } = await encryptBytes(key, textEncoder.encode(JSON.stringify(meta)), offerAad);
+              return { to, seq, ts, sig, iv, data };
+            }),
+          );
+          if (t.cancelled || fileTxRef.current.get(fileId) !== t) return;
+          getSocket().emit('file:offer', { payloads });
+          pumpFileChunks(t);
+        } catch {
+          failFileTransfer(t, 'interrupted');
+        }
+      })();
+    },
+    [failFileTransfer, keyFor, pumpFileChunks, pushItem],
+  );
+
+  const cancelFile = useCallback(
+    (fileId: string) => {
+      const t = fileTxRef.current.get(fileId);
+      if (t) failFileTransfer(t, 'cancelled');
+    },
+    [failFileTransfer],
+  );
+
+  // --- чистка «призраков», протухших индикаторов набора и застрявших файлов --
   useEffect(() => {
     const sweep = () => {
       const now = Date.now();
@@ -215,10 +525,13 @@ export function useChat(): ChatApi {
         const next = prev.filter((t) => t.until > now);
         return next.length === prev.length ? prev : next;
       });
+      for (const t of fileTxRef.current.values()) {
+        if (!t.cancelled && now - t.lastActivity > FILE_STALL_MS) failFileTransfer(t, 'interrupted');
+      }
     };
     const iv = window.setInterval(sweep, 1500);
     return () => window.clearInterval(iv);
-  }, []);
+  }, [failFileTransfer]);
 
   const resetRoomState = useCallback(() => {
     keyStoreRef.current.clear();
@@ -228,6 +541,10 @@ export function useChat(): ChatApi {
     outSeqRef.current = 0;
     roomSecretRef.current = null;
     ownSecretTagRef.current = null;
+    for (const t of fileTxRef.current.values()) t.cancelled = true;
+    fileTxRef.current.clear();
+    for (const url of ownedUrlsRef.current) URL.revokeObjectURL(url);
+    ownedUrlsRef.current.clear();
     setHasRoomSecret(false);
     applyMembers(() => []);
     setItems([]);
@@ -267,6 +584,8 @@ export function useChat(): ChatApi {
 
     const onDisconnect = () => {
       if (roomRef.current) setStatus('reconnecting');
+      // Буферы Engine.IO ушли вместе с сокетом — активные передачи не восстановить.
+      for (const t of [...fileTxRef.current.values()]) failFileTransfer(t, 'interrupted');
     };
 
     const onMemberJoined = (m: MemberWire) => {
@@ -360,11 +679,132 @@ export function useChat(): ChatApi {
       });
     };
 
+    // --- приём файлов --------------------------------------------------------
+    const finishRecv = async (t: FileTransfer) => {
+      const out = new Uint8Array(t.meta.size);
+      let off = 0;
+      for (let i = 0; i < t.meta.totalChunks; i++) {
+        const c = t.chunks.get(i);
+        if (!c) return;
+        out.set(c, off);
+        off += c.length;
+      }
+      const ok = (await sha256Hex(out)) === t.meta.sha256;
+      if (!ok) {
+        failFileTransfer(t, 'integrity');
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([out], { type: t.meta.mime || 'application/octet-stream' }));
+      ownedUrlsRef.current.add(url);
+      t.chunks.clear();
+      patchFileItem(t.itemId, (f) => ({ ...f, state: 'ready', progress: 1, url }));
+      fileTxRef.current.delete(t.meta.fileId);
+    };
+
+    const onFileOffer = async (ev: IncomingFileOfferEvent) => {
+      const r = roomRef.current;
+      if (!r) return;
+      const lastSeq = lastSeqRef.current.get(ev.from) ?? -1;
+      if (ev.seq <= lastSeq) return; // анти-replay, общий счётчик с текстовыми сообщениями
+      try {
+        const key = await keyFor(ev.from);
+        const offerAad = `${r.roomId}|${ev.from}|${ev.seq}|offer`;
+        const json = await decryptText(key, ev.iv, ev.data, offerAad);
+        const meta = JSON.parse(json) as FileManifest;
+        if (!isValidManifest(meta) || meta.size > MAX_FILE_SIZE) throw new Error('bad-offer');
+        lastSeqRef.current.set(ev.from, ev.seq);
+
+        const info = keyStoreRef.current.get(ev.from);
+        const canonical = canonicalFileOffer(
+          r.roomId,
+          ev.from,
+          ev.seq,
+          ev.ts,
+          meta.fileId,
+          meta.name,
+          meta.size,
+          meta.mime,
+          meta.sha256,
+          meta.totalChunks,
+          meta.chunkSize,
+        );
+        const verified = info ? await verifyCanonical(info.keys.ecdsa, canonical, ev.sig) : false;
+
+        const itemId = nextId();
+        fileTxRef.current.set(meta.fileId, {
+          dir: 'recv',
+          itemId,
+          roomId: r.roomId,
+          meta,
+          peers: [ev.from],
+          fromId: ev.from,
+          ts: ev.ts,
+          buf: null,
+          chunks: new Map(),
+          received: 0,
+          acked: 0,
+          inFlight: 0,
+          nextChunk: 0,
+          lastActivity: Date.now(),
+          cancelled: false,
+        });
+        pushItem({
+          id: itemId,
+          kind: 'file',
+          mine: false,
+          senderId: ev.from,
+          senderName: ev.fromName,
+          ts: ev.ts,
+          fileId: meta.fileId,
+          name: meta.name,
+          size: meta.size,
+          mime: meta.mime,
+          state: 'receiving',
+          progress: 0,
+          unverified: !verified,
+        });
+      } catch {
+        lastSeqRef.current.set(ev.from, ev.seq);
+        pushItem({
+          id: nextId(),
+          kind: 'system',
+          ts: Date.now(),
+          text: `An encrypted file from “${ev.fromName}” could not be accepted.`,
+          tone: 'warn',
+        });
+      }
+    };
+
+    const onFileChunk = async (ev: IncomingFileChunkEvent) => {
+      const r = roomRef.current;
+      if (!r) return;
+      const t = fileTxRef.current.get(ev.fileId);
+      if (!t || t.dir !== 'recv' || t.cancelled) return;
+      if (t.peers[0] !== ev.from) return;
+      if (!Number.isInteger(ev.index) || ev.index < 0 || ev.index >= t.meta.totalChunks) return;
+      if (t.chunks.has(ev.index)) return; // повтор чанка
+      try {
+        const key = await keyFor(ev.from);
+        const chunkAad = `${r.roomId}|${ev.from}|${ev.fileId}|${ev.index}`;
+        const plain = await decryptBytes(key, ev.iv, ev.data, chunkAad);
+        t.chunks.set(ev.index, plain);
+        t.received += plain.length;
+        t.lastActivity = Date.now();
+        patchFileItem(t.itemId, (f) => ({ ...f, progress: Math.min(t.received / t.meta.size, 1) }));
+        if (t.chunks.size === t.meta.totalChunks) void finishRecv(t);
+      } catch {
+        // GCM-тег не сошёлся: ключ не тот — остальные чанки тоже не расшифруются.
+        failFileTransfer(t, 'integrity');
+      }
+    };
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('member:joined', onMemberJoined);
     socket.on('member:left', onMemberLeft);
     socket.on('msg:new', onMessage);
+    socket.on('file:offer', onFileOffer);
+    socket.on('file:chunk', onFileChunk);
     socket.on('typing', onTyping);
     return () => {
       socket.off('connect', onConnect);
@@ -372,9 +812,11 @@ export function useChat(): ChatApi {
       socket.off('member:joined', onMemberJoined);
       socket.off('member:left', onMemberLeft);
       socket.off('msg:new', onMessage);
+      socket.off('file:offer', onFileOffer);
+      socket.off('file:chunk', onFileChunk);
       socket.off('typing', onTyping);
     };
-  }, [addMembers, applyMembers, keyFor, pushItem, removeMember]);
+  }, [addMembers, applyMembers, failFileTransfer, keyFor, patchFileItem, pushItem, removeMember]);
 
   const join = useCallback(
     async (roomId: string, name: string, secret: string | null = null) => {
@@ -527,6 +969,8 @@ export function useChat(): ChatApi {
     join,
     leave,
     sendText,
+    sendFile,
+    cancelFile,
     notifyTyping,
     dismissError,
   };

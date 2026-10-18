@@ -50,6 +50,50 @@ export interface TypingEvent {
   typing: boolean;
 }
 
+/** Зашифрованный чанк файла для конкретного получателя (без подписи — аутентичность даёт GCM+AAD). */
+export interface FileChunkPayload {
+  to: string;
+  fileId: string;
+  index: number;
+  iv: string;
+  data: string;
+}
+
+/** Событие file:offer от сервера (шифроманный манифест + ECDSA-подпись). */
+export interface IncomingFileOfferEvent {
+  from: string;
+  fromName: string;
+  seq: number;
+  ts: number;
+  sig: string;
+  iv: string;
+  data: string;
+}
+
+/** Событие file:chunk от сервера. */
+export interface IncomingFileChunkEvent {
+  from: string;
+  fromName: string;
+  fileId: string;
+  index: number;
+  iv: string;
+  data: string;
+}
+
+/** Расшифрованный манифест файла (payload события file:offer). */
+export interface FileManifest {
+  fileId: string;
+  name: string;
+  size: number;
+  mime: string;
+  /** SHA-256 исходного содержимого в hex. */
+  sha256: string;
+  chunkSize: number;
+  totalChunks: number;
+}
+
+export type FileTransferState = 'sending' | 'receiving' | 'ready' | 'failed';
+
 /** Элемент ленты чата. */
 export type ChatItem =
   | {
@@ -62,6 +106,27 @@ export type ChatItem =
       ts: number;
       failed?: boolean;
       /** Подпись отправителя не прошла проверку. */
+      unverified?: boolean;
+    }
+  | {
+      id: string;
+      kind: 'file';
+      mine: boolean;
+      senderId: string;
+      senderName: string;
+      ts: number;
+      fileId: string;
+      name: string;
+      size: number;
+      mime: string;
+      state: FileTransferState;
+      /** 0..1 — доля ack-нутых (sending) или полученных (receiving) чанков. */
+      progress: number;
+      /** Object URL собранного Blob (state 'ready', только у получателя). */
+      url?: string;
+      failed?: boolean;
+      failedReason?: 'cancelled' | 'integrity' | 'interrupted';
+      /** Подпись манифеста не прошла проверку. */
       unverified?: boolean;
     }
   | {

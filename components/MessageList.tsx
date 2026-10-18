@@ -2,13 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatItem } from '@/lib/types';
+import { formatBytes, MAX_PREVIEW_SIZE } from '@/lib/useChat';
 import Avatar from './Avatar';
-import { ChevronDownIcon, CopyIcon, LockIcon, WarnIcon } from './icons';
+import { ChevronDownIcon, CopyIcon, DownloadIcon, FileIcon, LockIcon, WarnIcon } from './icons';
+
+type FileChatItem = Extract<ChatItem, { kind: 'file' }>;
 
 interface MessageListProps {
   items: ChatItem[];
   inviteUrl: string;
   onCopyInvite: () => void;
+  onCancelFile?: (fileId: string) => void;
 }
 
 const GROUP_GAP_MS = 5 * 60_000;
@@ -17,8 +21,68 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Бабл файла: прогресс передачи, кнопка Download, inline-превью небольших картинок. */
+function FileBubble({ item, onCancel }: { item: FileChatItem; onCancel?: (fileId: string) => void }) {
+  const inFlight = item.state === 'sending' || item.state === 'receiving';
+  const previewable = item.state === 'ready' && !!item.url && item.mime.startsWith('image/') && item.size <= MAX_PREVIEW_SIZE;
+  const status = (() => {
+    if (item.failed) {
+      if (item.failedReason === 'cancelled') return 'cancelled';
+      if (item.failedReason === 'integrity') return 'integrity check failed';
+      return item.mine ? 'not sent' : 'interrupted';
+    }
+    if (inFlight) return `${Math.round(item.progress * 100)}%`;
+    if (item.mine) return 'sent';
+    return '';
+  })();
+  return (
+    <div
+      className={`msg__bubble msg__bubble--file${item.failed ? ' is-failed' : ''}${item.unverified ? ' msg__bubble--unverified' : ''}`}
+    >
+      {previewable ? (
+        <img className="msg__file-preview" src={item.url} alt={item.name} />
+      ) : (
+        <span className="msg__file-icon">
+          <FileIcon width={22} height={22} />
+        </span>
+      )}
+      <div className="msg__file-info">
+        <span className="msg__file-name" title={item.name}>
+          {item.name}
+        </span>
+        <span className="msg__file-sub">
+          {formatBytes(item.size)}
+          {status ? ` · ${status}` : ''}
+          {item.unverified ? ' · signature unverified' : ''}
+        </span>
+        {inFlight && (
+          <div
+            className="msg__file-bar"
+            role="progressbar"
+            aria-valuenow={Math.round(item.progress * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <i style={{ width: `${Math.max(item.progress * 100, 4)}%` }} />
+          </div>
+        )}
+        {inFlight && item.mine && onCancel && (
+          <button type="button" className="msg__file-cancel" onClick={() => onCancel(item.fileId)}>
+            Cancel
+          </button>
+        )}
+        {item.state === 'ready' && item.url && !item.mine && (
+          <a className="msg__file-download" href={item.url} download={item.name}>
+            <DownloadIcon width={14} height={14} /> Download
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Лента: группировка сообщений одного автора, системные строки, автоскролл. */
-export default function MessageList({ items, inviteUrl, onCopyInvite }: MessageListProps) {
+export default function MessageList({ items, inviteUrl, onCopyInvite, onCancelFile }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const [unread, setUnread] = useState(0);
@@ -81,9 +145,9 @@ export default function MessageList({ items, inviteUrl, onCopyInvite }: MessageL
             );
           }
           const prev = items[i - 1];
+          const prevIsMsg = !!prev && (prev.kind === 'text' || prev.kind === 'file');
           const firstOfGroup =
-            !prev ||
-            prev.kind !== 'text' ||
+            !prevIsMsg ||
             prev.senderId !== item.senderId ||
             item.ts - prev.ts > GROUP_GAP_MS;
           return (
@@ -100,7 +164,9 @@ export default function MessageList({ items, inviteUrl, onCopyInvite }: MessageL
                     <time>{formatTime(item.ts)}</time>
                   </div>
                 )}
-                {item.failed ? (
+                {item.kind === 'file' ? (
+                  <FileBubble item={item} onCancel={onCancelFile} />
+                ) : item.failed ? (
                   <div className="msg__bubble msg__bubble--failed" title="Failed to decrypt the message">
                     <WarnIcon /> Failed to decrypt the message
                   </div>

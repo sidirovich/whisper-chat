@@ -2,23 +2,27 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import EmojiPicker from './EmojiPicker';
-import { SendIcon, SmileIcon } from './icons';
+import { CloseIcon, FileIcon, PaperclipIcon, SendIcon, SmileIcon } from './icons';
+import { formatBytes, MAX_FILE_SIZE } from '@/lib/useChat';
 
 interface ComposerProps {
   onSend: (text: string) => void;
+  onSendFile: (file: File) => void;
   onTyping: (isTyping: boolean) => void;
   disabled?: boolean;
 }
 
 export const MAX_MESSAGE_LEN = 2000;
 
-/** Поле ввода: эмодзи-пикер, авторастущая textarea, Enter для отправки (на десктопе). */
-export default function Composer({ onSend, onTyping, disabled }: ComposerProps) {
+/** Поле ввода: эмодзи-пикер, вложение файлов, авторастущая textarea, Enter для отправки (на десктопе). */
+export default function Composer({ onSend, onSendFile, onTyping, disabled }: ComposerProps) {
   const [text, setText] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coarsePointer, setCoarsePointer] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -38,10 +42,16 @@ export default function Composer({ onSend, onTyping, disabled }: ComposerProps) 
   }, [onTyping]);
 
   const submit = useCallback(() => {
+    if (disabled) return;
     const value = text.trim();
-    if (!value || value.length > MAX_MESSAGE_LEN || disabled) return;
-    onSend(value);
+    const hasText = !!value && value.length <= MAX_MESSAGE_LEN;
+    const fileOk = !!pendingFile && pendingFile.size > 0 && pendingFile.size <= MAX_FILE_SIZE;
+    if (!hasText && !fileOk) return;
+    if (fileOk) onSendFile(pendingFile);
+    if (hasText) onSend(value);
     setText('');
+    setPendingFile(null);
+    if (fileRef.current) fileRef.current.value = '';
     setPickerOpen(false);
     onTyping(false);
     if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
@@ -49,7 +59,12 @@ export default function Composer({ onSend, onTyping, disabled }: ComposerProps) 
       resize();
       taRef.current?.focus();
     });
-  }, [disabled, onSend, onTyping, resize, text]);
+  }, [disabled, onSend, onSendFile, onTyping, pendingFile, resize, text]);
+
+  const pickFile = (file: File | null | undefined) => {
+    if (file) setPendingFile(file);
+    if (fileRef.current) fileRef.current.value = '';
+  };
 
   const handleChange = (value: string) => {
     setText(value);
@@ -77,12 +92,47 @@ export default function Composer({ onSend, onTyping, disabled }: ComposerProps) 
   };
 
   const overLimit = text.length > MAX_MESSAGE_LEN;
+  const fileTooBig = !!pendingFile && (pendingFile.size === 0 || pendingFile.size > MAX_FILE_SIZE);
 
   return (
     <div className="composer" ref={boxRef}>
       {pickerOpen && (
         <EmojiPicker anchorRef={boxRef} onPick={insertEmoji} onClose={() => setPickerOpen(false)} />
       )}
+
+      {pendingFile && (
+        <div className={`composer__file${fileTooBig ? ' is-too-big' : ''}`}>
+          <FileIcon width={16} height={16} />
+          <span className="composer__file-name">{pendingFile.name}</span>
+          <span className="composer__file-size">{formatBytes(pendingFile.size)}</span>
+          {fileTooBig && <span className="composer__file-warn">over the {formatBytes(MAX_FILE_SIZE)} limit</span>}
+          <button
+            type="button"
+            className="composer__file-remove"
+            onClick={() => setPendingFile(null)}
+            aria-label="Remove attachment"
+          >
+            <CloseIcon width={14} height={14} />
+          </button>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="composer__attach"
+        onClick={() => fileRef.current?.click()}
+        aria-label="Attach file"
+        title="Attach file"
+        disabled={disabled}
+      >
+        <PaperclipIcon width={21} height={21} />
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        hidden
+        onChange={(e) => pickFile(e.target.files?.[0])}
+      />
 
       <button
         type="button"
@@ -115,8 +165,8 @@ export default function Composer({ onSend, onTyping, disabled }: ComposerProps) 
         type="button"
         className="composer__send"
         onClick={submit}
-        disabled={disabled || !text.trim() || overLimit}
-        aria-label="Send message"
+        disabled={disabled || (!text.trim() && !pendingFile) || overLimit || fileTooBig}
+        aria-label={pendingFile ? 'Send file' : 'Send message'}
         title="Send (Enter)"
       >
         <SendIcon />

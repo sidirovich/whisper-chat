@@ -8,7 +8,8 @@ const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
+  // img-src blob: — inline-превью полученных файлов (Object URL расшифрованного Blob)
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self' ws: wss:",
   "object-src 'none'",

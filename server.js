@@ -11,8 +11,11 @@
  * памяти (Map rooms). Перезапуск процесса = все комнаты исчезли, истории нет.
  *
  * Анти-абьюз: лимит соединений на IP и всего, потолок комнат, rate-limit на
- * join/typing/сообщения, проверка Origin входящих подключений (чужие сайты
+ * join/typing/сообщения/файлы, проверка Origin входящих подключений (чужие сайты
  * не могут пользоваться сокет-сервером), дефолт-привязка на 127.0.0.1.
+ *
+ * Файлы передаются как шифрованные чанки (file:offer / file:chunk): сервер
+ * релеит непрозрачные куски шифротекта и не хранит ни байта из них.
  */
 const { createServer } = require('http');
 const express = require('express');
@@ -34,10 +37,15 @@ const MAX_NAME_LEN = 24;
 const MAX_CIPHER_B64 = 16 * 1024; // один шифротекст в base64
 const MAX_PAYLOADS = 64;
 const MAX_SIG_B64 = 512;
+const MAX_FILE_CHUNK_B64 = 768 * 1024; // чанк файла (шифротекст+тег) в base64, запас до maxHttpBufferSize
+const MAX_FILE_ID_LEN = 64; // fileId: [A-Za-z0-9_-]
+const MAX_FILE_INDEX = 4096; // потолок номера чанка (100 МБ / 512 КБ ≈ 200)
 const RATE_WINDOW_MS = 10_000;
 const MSG_MAX = 40;
 const JOIN_MAX = 5;
 const TYPING_MAX = 10;
+const FILE_OFFER_MAX = 20;
+const FILE_CHUNK_MAX = 120; // ~61 МБ шифротекста на окно 10 с, суммарно по всем получателям
 const MAX_SOCKETS = 2000;
 const MAX_SOCKETS_PER_IP = 10;
 
@@ -155,6 +163,8 @@ nextApp.prepare().then(() => {
     socket.data.msgTimes = [];
     socket.data.joinTimes = [];
     socket.data.typingTimes = [];
+    socket.data.fileOfferTimes = [];
+    socket.data.fileChunkTimes = [];
 
     socket.on('disconnect', () => {
       leaveRoom(socket);
@@ -246,6 +256,64 @@ nextApp.prepare().then(() => {
           data: p.data,
         });
       }
+    });
+
+    // --- передача файлов: манифест + чанки (всё шифротекст, relay без хранения)
+    // Имя/размер/mime лежат ТОЛЬКО внутри шифроманного манифеста; по сети в
+    // открытом виде ходят непрозрачные fileId/index и шифротекст.
+    socket.on('file:offer', (payload) => {
+      const room = rooms.get(socket.data.roomId);
+      if (!room) return;
+      const sender = room.get(socket.id);
+      if (!sender) return;
+      if (!allow(socket.data.fileOfferTimes, FILE_OFFER_MAX, Date.now())) return;
+
+      const payloads = Array.isArray(payload?.payloads) ? payload.payloads.slice(0, MAX_PAYLOADS) : [];
+      for (const p of payloads) {
+        if (!p || typeof p !== 'object') continue;
+        if (!room.has(p.to) || p.to === socket.id) continue;
+        if (!Number.isInteger(p.seq) || p.seq < 0 || p.seq > 2 ** 31) continue;
+        if (!Number.isInteger(p.ts) || Math.abs(Date.now() - p.ts) > 10 * 60_000) continue;
+        if (typeof p.sig !== 'string' || p.sig.length === 0 || p.sig.length > MAX_SIG_B64) continue;
+        if (typeof p.iv !== 'string' || p.iv.length > 64) continue;
+        if (typeof p.data !== 'string' || p.data.length > MAX_CIPHER_B64) continue;
+        io.to(p.to).emit('file:offer', {
+          from: socket.id,
+          fromName: sender.name,
+          seq: p.seq,
+          ts: p.ts,
+          sig: p.sig,
+          iv: p.iv,
+          data: p.data,
+        });
+      }
+    });
+
+    // Один чанк = один emit ( payloads ≤ ~1 МБ, лимит Engine.IO ); ack подтверждает
+    // релей сервером — отправитель использует его для flow-control (окно чанков).
+    socket.on('file:chunk', (payload, ack) => {
+      const room = rooms.get(socket.data.roomId);
+      if (!room) return;
+      const sender = room.get(socket.id);
+      if (!sender) return;
+      if (typeof ack !== 'function') return;
+      const fail = (reason) => { try { ack({ ok: false, reason }); } catch { /* noop */ } };
+
+      if (!allow(socket.data.fileChunkTimes, FILE_CHUNK_MAX, Date.now())) return fail('rate');
+
+      const to = typeof payload?.to === 'string' ? payload.to : '';
+      const fileId = typeof payload?.fileId === 'string' ? payload.fileId : '';
+      const index = payload?.index;
+      const iv = payload?.iv;
+      const data = payload?.data;
+      if (!room.has(to) || to === socket.id) return fail('recipient');
+      if (!new RegExp(`^[A-Za-z0-9_-]{1,${MAX_FILE_ID_LEN}}$`).test(fileId)) return fail('file-id');
+      if (!Number.isInteger(index) || index < 0 || index > MAX_FILE_INDEX) return fail('index');
+      if (typeof iv !== 'string' || iv.length === 0 || iv.length > 64) return fail('iv');
+      if (typeof data !== 'string' || data.length === 0 || data.length > MAX_FILE_CHUNK_B64) return fail('size');
+
+      io.to(to).emit('file:chunk', { from: socket.id, fromName: sender.name, fileId, index, iv, data });
+      try { ack({ ok: true }); } catch { /* noop */ }
     });
 
     // --- индикатор набора текста (метаданные, без содержимого) -------------
