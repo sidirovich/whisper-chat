@@ -9,6 +9,7 @@ import {
   encryptText,
   generateIdentity,
   jwkFingerprint,
+  roomSecretTag,
   signCanonical,
   verifyCanonical,
   type Identity,
@@ -38,6 +39,8 @@ export interface ChatApi {
   selfFingerprint: string | null;
   /** Секретная фраза комнаты задана (участвует в KDF, серверу не передаётся). */
   hasRoomSecret: boolean;
+  /** Публичный тег секретной фразы (для сверки с другими участниками). */
+  ownSecretTag: string;
   join(roomId: string, name: string, secret?: string | null): Promise<boolean>;
   leave(): void;
   sendText(text: string): void;
@@ -56,6 +59,7 @@ interface MemberWire {
   id: string;
   name: string;
   publicKey: PublicKeys;
+  secretTag?: string;
 }
 
 export function useChat(): ChatApi {
@@ -78,6 +82,8 @@ export function useChat(): ChatApi {
   const derivedKeysRef = useRef(new Map<string, Promise<CryptoKey>>());
   /** Секретная фраза комнаты — только локально, в KDF. */
   const roomSecretRef = useRef<string | null>(null);
+  /** Публичный тег фразы ('' — фразы нет; null — ещё не вычислен/сброшен). */
+  const ownSecretTagRef = useRef<string | null>(null);
   /** Исходящий счётчик сообщений и анти-replay окно по отправителям. */
   const outSeqRef = useRef(0);
   const lastSeqRef = useRef(new Map<string, number>());
@@ -144,6 +150,23 @@ export function useChat(): ChatApi {
 
   const addMembers = useCallback(
     (list: MemberWire[]) => {
+      // СИНХРОННО сохраняем ключи — сообщение может прийти раньше, чем
+      // посчитается отпечаток (async ниже); иначе гонка «no-public-key».
+      for (const m of list) {
+        keyStoreRef.current.set(m.id, { keys: m.publicKey });
+        const tag = m.secretTag ?? '';
+        const ownTag = ownSecretTagRef.current;
+        // Рассинхрон секретной фразы: сообщения будут нечитаемы — предупреждаем сразу.
+        if (ownTag !== null && tag !== ownTag) {
+          pushItem({
+            id: nextId(),
+            kind: 'system',
+            ts: Date.now(),
+            text: `⚠ У «${m.name}» ${tag ? 'другая' : 'нет'} секретной фразы комнаты${ownTag ? '' : ' (у вас она задана)'} — сообщения между вами не расшифруются. Выйдите из чата и войдите с одинаковой фразой.`,
+            tone: 'warn',
+          });
+        }
+      }
       (async () => {
         for (const m of list) {
           const fingerprint = await jwkFingerprint(m.publicKey);
@@ -159,8 +182,10 @@ export function useChat(): ChatApi {
             });
           }
           nameFpRef.current.set(m.name, fingerprint);
-          keyStoreRef.current.set(m.id, { keys: m.publicKey });
-          applyMembers((prev) => [...prev.filter((x) => x.id !== m.id), { id: m.id, name: m.name, keys: m.publicKey, fingerprint }]);
+          applyMembers((prev) => [
+            ...prev.filter((x) => x.id !== m.id),
+            { id: m.id, name: m.name, keys: m.publicKey, fingerprint, secretTag: m.secretTag ?? '' },
+          ]);
           keyFor(m.id).catch(() => {}); // прогреваем ключ
         }
       })();
@@ -202,6 +227,7 @@ export function useChat(): ChatApi {
     lastSeqRef.current.clear();
     outSeqRef.current = 0;
     roomSecretRef.current = null;
+    ownSecretTagRef.current = null;
     setHasRoomSecret(false);
     applyMembers(() => []);
     setItems([]);
@@ -216,13 +242,14 @@ export function useChat(): ChatApi {
     const onConnect = () => {
       const r = roomRef.current;
       if (!r || !identityRef.current) return;
-      // Переподключение: перезаходим в комнату теми же ключами
+      // Переподключение: перезаходим в комнату теми же ключами и тегом фразы
       socket.emit(
         'room:join',
         {
           roomId: r.roomId,
           name: r.name,
           publicKey: { ecdh: identityRef.current.ecdhPublicJwk, ecdsa: identityRef.current.ecdsaPublicJwk },
+          secretTag: ownSecretTagRef.current ?? '',
         },
         (ack: JoinAck) => {
           if (!ack.ok) {
@@ -301,7 +328,18 @@ export function useChat(): ChatApi {
           ts: ev.ts,
           failed: true,
         });
-        if (roomSecretRef.current) {
+        // Точная причина по тегу фразы, если отправитель уже известен.
+        const senderTag = membersRef.current.find((m) => m.id === ev.from)?.secretTag;
+        const ownTag = ownSecretTagRef.current;
+        if (ownTag !== null && senderTag !== undefined && senderTag !== ownTag) {
+          pushItem({
+            id: nextId(),
+            kind: 'system',
+            ts: Date.now(),
+            text: `Сообщение от «${ev.fromName}» не расшифровано: у вас${ownTag ? ' другая' : ' не задана'} секретная фраза комнаты. Выйдите из чата и войдите с фразой, которую задал создатель.`,
+            tone: 'warn',
+          });
+        } else if (roomSecretRef.current) {
           pushItem({
             id: nextId(),
             kind: 'system',
@@ -351,6 +389,9 @@ export function useChat(): ChatApi {
       setHasRoomSecret(roomSecretRef.current !== null);
       setStatus('joining');
 
+      // Публичный тег фразы для сверки с другими участниками (не раскрывает фразу).
+      ownSecretTagRef.current = await roomSecretTag(roomId, roomSecretRef.current);
+
       socket.connect();
       const ack = await new Promise<JoinAck>((resolve) => {
         const timer = window.setTimeout(
@@ -366,6 +407,7 @@ export function useChat(): ChatApi {
               ecdh: identityRef.current!.ecdhPublicJwk,
               ecdsa: identityRef.current!.ecdsaPublicJwk,
             },
+            secretTag: ownSecretTagRef.current,
           },
           (res: JoinAck) => {
             window.clearTimeout(timer);
@@ -482,6 +524,7 @@ export function useChat(): ChatApi {
     typing: typing.map(({ id, name }) => ({ id, name })),
     selfFingerprint,
     hasRoomSecret,
+    ownSecretTag: ownSecretTagRef.current ?? '',
     join,
     leave,
     sendText,

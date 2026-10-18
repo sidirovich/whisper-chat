@@ -79,6 +79,7 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
           selfName={room.name}
           selfFingerprint={chat.selfFingerprint}
           members={members}
+          ownSecretTag={chat.ownSecretTag}
           onCopyInvite={() => void copyInvite()}
           onShareInvite={() => void shareInvite()}
           onLeave={() => {

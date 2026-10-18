@@ -634,6 +634,18 @@ button:disabled {
   letter-spacing: 0.06em;
 }
 
+.side__member-tagwarn {
+  display: inline-block;
+  width: fit-content;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #ffe9b3;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
 .side__info {
   background: var(--surface-2);
   border: 1px solid var(--border-soft);

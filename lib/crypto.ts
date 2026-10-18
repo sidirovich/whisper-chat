@@ -153,3 +153,19 @@ export async function jwkFingerprint(keys: PublicKeys): Promise<string> {
     .match(/.{4}/g)!
     .join(' ');
 }
+
+/**
+ * Публичный «отпечаток секретной фразы» комнаты: по нему участники мгновенно
+ * видят рассинхрон фраз, не раскрывая саму фразу. PBKDF2 (50k итераций)
+ * затрудняет перебор по словарю против тега. Пустой фразе соответствует ''.
+ */
+export async function roomSecretTag(roomId: string, secret: string | null): Promise<string> {
+  if (!secret) return '';
+  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: encoder.encode(`tag|${roomId}`), iterations: 50_000 },
+    key,
+    64,
+  );
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}

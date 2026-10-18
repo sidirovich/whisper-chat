@@ -80,6 +80,15 @@ nextApp.prepare().then(() => {
     return !!pkg && isValidEcJwk(pkg.ecdh) && isValidEcJwk(pkg.ecdsa);
   }
 
+  /**
+   * Отпечаток секретной фразы комнаты (16 hex-символов или ''). Сама фраза
+   * серверу не передаётся; тег нужен только участникам для сверки совпадения.
+   */
+  function normalizeSecretTag(raw) {
+    const s = String(raw ?? '');
+    return /^[0-9a-f]{0,32}$/.test(s) ? s : '';
+  }
+
   /** NFKC + вырезание невидимых/bidi-символов: защита от спуфинга имён. */
   function normalizeName(raw) {
     return String(raw || '')
@@ -167,6 +176,7 @@ nextApp.prepare().then(() => {
         const roomId = String(payload?.roomId || '').toUpperCase().trim();
         const name = normalizeName(payload?.name);
         const publicKey = payload?.publicKey;
+        const secretTag = normalizeSecretTag(payload?.secretTag);
 
         if (!ROOM_ID_RE.test(roomId)) return ack({ ok: false, error: 'Неверный код чата' });
         if (!name) return ack({ ok: false, error: 'Укажите имя' });
@@ -190,17 +200,17 @@ nextApp.prepare().then(() => {
 
         if (isSwitching) leaveRoom(socket); // сокет переходит в другую комнату
 
-        room.set(socket.id, { name, publicKey });
+        room.set(socket.id, { name, publicKey, secretTag });
         socket.data.roomId = roomId;
         socket.join(roomId);
 
         // Новичку — открытые ключи всех, кто уже в чате…
         const members = [...room.entries()]
           .filter(([id]) => id !== socket.id)
-          .map(([id, m]) => ({ id, name: m.name, publicKey: m.publicKey }));
+          .map(([id, m]) => ({ id, name: m.name, publicKey: m.publicKey, secretTag: m.secretTag }));
 
-        // …а всем старожилам — открытые ключи новичка.
-        socket.to(roomId).emit('member:joined', { id: socket.id, name, publicKey });
+        // …а всем старожилам — открытые ключи и тег фразы новичка.
+        socket.to(roomId).emit('member:joined', { id: socket.id, name, publicKey, secretTag });
 
         ack({ ok: true, self: { id: socket.id }, members, count: room.size });
       } catch {

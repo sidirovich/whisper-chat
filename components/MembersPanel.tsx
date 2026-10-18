@@ -11,6 +11,8 @@ interface MembersPanelProps {
   selfName: string;
   selfFingerprint: string | null;
   members: MemberState[];
+  /** Тег секретной фразы текущего пользователя ('' — фразы нет). */
+  ownSecretTag: string;
   onCopyInvite: () => void;
   onShareInvite: () => void;
   onLeave: () => void;
@@ -23,6 +25,7 @@ export default function MembersPanel({
   selfName,
   selfFingerprint,
   members,
+  ownSecretTag,
   onCopyInvite,
   onShareInvite,
   onLeave,
@@ -79,6 +82,11 @@ export default function MembersPanel({
               <Avatar name={m.name} id={m.id} size={34} />
               <div className="side__member-info">
                 <span className="side__member-name">{m.name}</span>
+                {m.secretTag !== ownSecretTag && (
+                  <span className="side__member-tagwarn" title="Секретная фраза комнаты не совпадает — сообщения не расшифруются">
+                    фраза не совпадает
+                  </span>
+                )}
                 <span className="side__member-fp" title="Отпечаток открытого ключа (SHA-256)">
                   {m.fingerprint}
                 </span>

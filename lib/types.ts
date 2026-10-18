@@ -9,6 +9,8 @@ export interface MemberState {
   keys: PublicKeys;
   /** Короткий отпечаток обоих ключей (для визуальной сверки). */
   fingerprint: string;
+  /** Публичный тег секретной фразы комнаты ('' — фразы нет). Для сверки совпадения. */
+  secretTag: string;
 }
 
 /** Ответ сервера на room:join. */
@@ -16,7 +18,7 @@ export interface JoinAck {
   ok: boolean;
   error?: string;
   self?: { id: string };
-  members?: { id: string; name: string; publicKey: PublicKeys }[];
+  members?: { id: string; name: string; publicKey: PublicKeys; secretTag?: string }[];
   count?: number;
 }
 

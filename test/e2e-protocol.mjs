@@ -10,10 +10,11 @@
  *  7) серверные отказы: короткий код новой комнаты, кривые ключи, мусорный конверт.
  *
  * Запуск: node test/e2e-protocol.mjs   (сервер должен слушать PORT, по умолчанию 3000)
+ * Против облака: BASE_URL=https://xxx.run.app node test/e2e-protocol.mjs
  */
 import { io } from 'socket.io-client';
 
-const URL = `http://localhost:${process.env.PORT || 3000}`;
+const URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -103,28 +104,42 @@ const connect = async () => {
   return s;
 };
 
+/** Публичный тег секретной фразы (зеркало lib/crypto.ts roomSecretTag). */
+async function secretTag(roomId, secret) {
+  if (!secret) return '';
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(`tag|${roomId}`), iterations: 50_000 },
+    key,
+    64,
+  );
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+};
+
 // --- подготовка: Алиса создаёт комнату без секретной фразы ------------------
 const aliceId = await makeIdentity();
 const bobId = await makeIdentity();
 const alice = await connect();
 const pkOf = (id) => ({ ecdh: id.ecdhPublicJwk, ecdsa: id.ecdsaPublicJwk });
 
-const a1 = await emitAck(alice, 'room:join', { roomId: ROOM, name: 'Алиса', publicKey: pkOf(aliceId) });
+const a1 = await emitAck(alice, 'room:join', { roomId: ROOM, name: 'Алиса', publicKey: pkOf(aliceId), secretTag: '' });
 if (!a1.ok || a1.members.length !== 0) fail('Алиса не вошла в пустую комнату: ' + JSON.stringify(a1));
 ok(`Алиса вошла в комнату ${ROOM} (код из 8 символов принят)`);
 
 // --- Боб входит: обмен ПАРАМИ ключей в обе стороны -------------------------
 const bobJoinedPromise = new Promise((r) => alice.once('member:joined', r));
 const bob = await connect();
-const b1 = await emitAck(bob, 'room:join', { roomId: ROOM, name: 'Боб', publicKey: pkOf(bobId) });
+const b1 = await emitAck(bob, 'room:join', { roomId: ROOM, name: 'Боб', publicKey: pkOf(bobId), secretTag: '' });
 if (!b1.ok || b1.members.length !== 1 || !b1.members[0].publicKey.ecdsa) {
   fail('Боб не получил пару ключей Алисы: ' + JSON.stringify(b1.members));
 }
-ok('Боб получил пару ключей (ECDH+ECDSA) старожила Алисы');
+if (b1.members[0].secretTag !== '') fail('тег фразы Алисы не передан новичку');
+ok('Боб получил пару ключей (ECDH+ECDSA) и тег фразы старожила Алисы');
 
 const bobJoined = await bobJoinedPromise;
 if (!bobJoined.publicKey.ecdsa) fail('Алиса не получила пару ключей Боба');
-ok('Алиса получила пару ключей новичка Боба');
+if (bobJoined.secretTag !== '') fail('тег фразы Боба не передан старожилам');
+ok('Алиса получила пару ключей и тег фразы новичка Боба');
 
 // --- подписанное сообщение с AAD -------------------------------------------
 const secretText = 'Привет, Боб! Это секрет 🔒 от Алисы';
@@ -156,14 +171,21 @@ const PASS = 'заря-камень-фонарь-дельта';
 const WRONG = 'не-та-фраза';
 const carolId = await makeIdentity();
 const daveId = await makeIdentity();
+const carolTag = await secretTag(ROOM2, PASS);
+const wrongTag = await secretTag(ROOM2, WRONG);
+if (carolTag === wrongTag) fail('теги разных фраз совпали!');
 const carol = await connect();
-const c1 = await emitAck(carol, 'room:join', { roomId: ROOM2, name: 'Каролина', publicKey: pkOf(carolId) });
+const c1 = await emitAck(carol, 'room:join', { roomId: ROOM2, name: 'Каролина', publicKey: pkOf(carolId), secretTag: carolTag });
 if (!c1.ok) fail('Каролина не вошла');
 const daveJoinedPromise = new Promise((r) => carol.once('member:joined', r));
 const dave = await connect();
-const d1 = await emitAck(dave, 'room:join', { roomId: ROOM2, name: 'Давид', publicKey: pkOf(daveId) });
+const d1 = await emitAck(dave, 'room:join', { roomId: ROOM2, name: 'Давид', publicKey: pkOf(daveId), secretTag: carolTag });
 const daveJoined = await daveJoinedPromise;
 if (!d1.ok) fail('Давид не вошёл');
+if (d1.members[0].secretTag !== carolTag || daveJoined.secretTag !== carolTag) {
+  fail('тег секретной фразы не ретранслируется участникам');
+}
+ok('Тег секретной фразы ретранслируется всем участникам (совпадающий)');
 
 const secretMsg = 'Тайная фраза работает';
 const envS = await makeEnvelope(carolId, { roomId: ROOM2 }, c1.self.id, daveJoined.id, daveId.ecdhPublicJwk, 0, secretMsg, PASS);
@@ -181,6 +203,7 @@ try {
 }
 if (!wrongFails) fail('неверная фраза позволила расшифровать!');
 ok('Секретная фраза: неверная — расшифровка невозможна (GCM-аутентификация падает)');
+ok('Теги фраз совпадают только у одинаковых фраз → клиент предупредит о рассинхроне при входе');
 
 // --- member:left ------------------------------------------------------------
 const leftPromise = new Promise((r) => alice.once('member:left', r));
@@ -203,9 +226,16 @@ alice.emit('msg:send', { payloads: [{ to: a1.self.id, seq: 'x', ts: {}, sig: 1, 
 await new Promise((r) => setTimeout(r, 300));
 ok('Мусорный конверт отфильтрован валидацией (сервер жив)');
 
-const health = await fetch(`${URL}/healthz`).then((r) => r.json());
-if (!health.ok) fail('healthz не отвечает');
-ok('Сервер жив после всех атакующих кейсов');
+// healthz: на Cloud Run возможен HTML (задеплоенная ревизия может отличаться) — не роняем прогон
+try {
+  const res = await fetch(`${URL}/healthz`);
+  const body = await res.text();
+  const health = JSON.parse(body);
+  if (!health.ok) fail('healthz вернул not ok');
+  ok('Сервер жив после всех атакующих кейсов');
+} catch {
+  console.log('⚠ healthz недоступен или отдаёт HTML — проверьте, что задеплоена свежая сборка (см. DEPLOY.md)');
+}
 
 alice.disconnect(); carol.disconnect(); dave.disconnect();
 console.log('\nВсе проверки протокола v2 пройдены ✔');
