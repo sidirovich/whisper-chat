@@ -90,36 +90,36 @@ export default function JoinScreen({ initialCode, keysReady, insecure, busy, err
             <circle cx="32" cy="39" r="4" fill="#6d7cff" />
           </svg>
         </div>
-        <h1 className="join__title">Шёпот</h1>
+        <h1 className="join__title">Whisper</h1>
         <p className="join__subtitle">
-          Чат со сквозным шифрованием и подписями сообщений. Ключи создаются в вашем браузере —
-          сервер видит только шифрованные сообщения и никогда не хранит историю.
+          End-to-end encrypted chat with message signatures. Keys are created in your browser —
+          the server only sees encrypted messages and never stores history.
         </p>
 
         {insecure && (
           <div className="banner banner--warn" role="alert">
-            <WarnIcon /> Браузер не даёт доступа к Web Crypto. Откройте страницу по HTTPS или с
+            <WarnIcon /> The browser does not expose Web Crypto. Open the page over HTTPS or from
             localhost.
           </div>
         )}
 
         <form className="join__form" onSubmit={submitJoin}>
           <label className="field">
-            <span className="field__label">Ваше имя</span>
+            <span className="field__label">Your name</span>
             <input
               ref={nameRef}
               className="field__input"
               type="text"
               value={name}
               maxLength={MAX_NAME}
-              placeholder="Например, Аня"
+              placeholder="e.g. Anna"
               autoComplete="off"
               onChange={(e) => setName(e.target.value)}
             />
           </label>
 
           <label className="field">
-            <span className="field__label">Код чата</span>
+            <span className="field__label">Room code</span>
             <input
               ref={codeRef}
               className="field__input field__input--code"
@@ -128,7 +128,7 @@ export default function JoinScreen({ initialCode, keysReady, insecure, busy, err
               autoCapitalize="characters"
               value={codeNorm}
               maxLength={200}
-              placeholder="Код или ссылка-приглашение"
+              placeholder="Code or invite link"
               autoComplete="off"
               spellCheck={false}
               disabled={busy}
@@ -137,33 +137,33 @@ export default function JoinScreen({ initialCode, keysReady, insecure, busy, err
           </label>
 
           <label className="field">
-            <span className="field__label">Секретная фраза (необязательно)</span>
+            <span className="field__label">Passphrase (optional)</span>
             <input
               className="field__input"
               type="password"
               value={secret}
               maxLength={128}
-              placeholder="Пусто — чат без фразы"
+              placeholder="Empty — chat without a passphrase"
               autoComplete="new-password"
               disabled={busy}
               onChange={(e) => setSecret(e.target.value)}
             />
             <span className="field__hint">
-              Участвует в выводе ключей шифрования и на сервер не отправляется. Все участники должны
-              ввести одинаковую фразу.{' '}
+              It participates in encryption key derivation and is never sent to the server. Every
+              participant must enter the same passphrase.{' '}
               <button
                 type="button"
                 className="join__gen"
                 onClick={() => setSecret(makePassphrase())}
                 disabled={busy}
               >
-                Сгенерировать
+                Generate
               </button>
             </span>
           </label>
 
           {initialCode && codeNorm !== initialCode && (
-            <p className="join__hint">Вы приглашены — введите код {initialCode} или свой.</p>
+            <p className="join__hint">You were invited — enter code {initialCode} or your own.</p>
           )}
 
           {error && (
@@ -173,31 +173,31 @@ export default function JoinScreen({ initialCode, keysReady, insecure, busy, err
           )}
 
           <button className="btn btn--primary btn--block" type="submit" disabled={!canJoin}>
-            {busy ? 'Входим…' : 'Войти в чат'}
+            {busy ? 'Joining…' : 'Join chat'}
           </button>
           <button className="join__alt" type="button" onClick={submitCreate} disabled={!canCreate}>
-            или <span>создать новый защищённый чат</span>
+            or <span>create a new secure chat</span>
           </button>
-          {!keysReady && !insecure && <p className="join__hint">Генерируем ключи шифрования…</p>}
+          {!keysReady && !insecure && <p className="join__hint">Generating encryption keys…</p>}
         </form>
 
         <ul className="join__features">
           <li>
-            <LockIcon /> Сквозное шифрование ECDH + AES-256-GCM
+            <LockIcon /> End-to-end encryption: ECDH + AES-256-GCM
           </li>
           <li>
-            <KeyIcon /> Подписи ECDSA: автора сообщения не подделать
+            <KeyIcon /> ECDSA signatures: message authorship can't be forged
           </li>
           <li>
-            <BoltIcon /> Ключи новичку и участникам раздаются автоматически
+            <BoltIcon /> Keys are handed to newcomers and members automatically
           </li>
           <li>
-            <GhostIcon /> История не сохраняется: чаты живут только в памяти
+            <GhostIcon /> No history is stored: chats live only in memory
           </li>
         </ul>
       </div>
 
-      <p className="join__footer">Ничего не логируется • Ничего не сохраняется • Только RAM</p>
+      <p className="join__footer">Nothing is logged • Nothing is stored • RAM only</p>
     </main>
   );
 }

@@ -171,31 +171,31 @@ nextApp.prepare().then(() => {
       if (typeof ack !== 'function') return;
       try {
         if (!allow(socket.data.joinTimes, JOIN_MAX, Date.now())) {
-          return ack({ ok: false, error: 'Слишком часто. Подождите немного.' });
+          return ack({ ok: false, error: 'Too many attempts. Wait a moment.' });
         }
         const roomId = String(payload?.roomId || '').toUpperCase().trim();
         const name = normalizeName(payload?.name);
         const publicKey = payload?.publicKey;
         const secretTag = normalizeSecretTag(payload?.secretTag);
 
-        if (!ROOM_ID_RE.test(roomId)) return ack({ ok: false, error: 'Неверный код чата' });
-        if (!name) return ack({ ok: false, error: 'Укажите имя' });
-        if (!isValidPublicKey(publicKey)) return ack({ ok: false, error: 'Некорректные открытые ключи' });
+        if (!ROOM_ID_RE.test(roomId)) return ack({ ok: false, error: 'Invalid room code' });
+        if (!name) return ack({ ok: false, error: 'Name is required' });
+        if (!isValidPublicKey(publicKey)) return ack({ ok: false, error: 'Invalid public keys' });
 
         let room = rooms.get(roomId);
         if (!room) {
           if (roomId.length < MIN_NEW_ROOM_LEN) {
-            return ack({ ok: false, error: 'Код нового чата — минимум 8 символов' });
+            return ack({ ok: false, error: 'A new room code must be at least 8 characters' });
           }
           if (rooms.size >= MAX_ROOMS) {
-            return ack({ ok: false, error: 'Сервер перегружен, попробуйте позже' });
+            return ack({ ok: false, error: 'Server is overloaded, try again later' });
           }
           room = new Map();
           rooms.set(roomId, room);
         }
         const isSwitching = socket.data.roomId && socket.data.roomId !== roomId;
         if (!room.has(socket.id) && room.size >= MAX_MEMBERS && !isSwitching) {
-          return ack({ ok: false, error: `В чате уже максимум участников (${MAX_MEMBERS})` });
+          return ack({ ok: false, error: `The chat is already at its maximum of ${MAX_MEMBERS} participants` });
         }
 
         if (isSwitching) leaveRoom(socket); // сокет переходит в другую комнату
@@ -214,7 +214,7 @@ nextApp.prepare().then(() => {
 
         ack({ ok: true, self: { id: socket.id }, members, count: room.size });
       } catch {
-        try { ack({ ok: false, error: 'Внутренняя ошибка сервера' }); } catch { /* noop */ }
+        try { ack({ ok: false, error: 'Internal server error' }); } catch { /* noop */ }
       }
     });
 

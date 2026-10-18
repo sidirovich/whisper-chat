@@ -88,9 +88,9 @@ export default function Composer({ onSend, onTyping, disabled }: ComposerProps) 
         type="button"
         className={`composer__emoji${pickerOpen ? ' is-active' : ''}`}
         onClick={() => setPickerOpen((v) => !v)}
-        aria-label="Добавить эмодзи"
+        aria-label="Add emoji"
         aria-expanded={pickerOpen}
-        title="Эмодзи"
+        title="Emoji"
       >
         <SmileIcon width={24} height={24} />
       </button>
@@ -100,7 +100,7 @@ export default function Composer({ onSend, onTyping, disabled }: ComposerProps) 
         className="composer__input"
         rows={1}
         value={text}
-        placeholder="Сообщение…"
+        placeholder="Message…"
         disabled={disabled}
         onChange={(e) => handleChange(e.target.value)}
         onKeyDown={(e) => {
@@ -116,8 +116,8 @@ export default function Composer({ onSend, onTyping, disabled }: ComposerProps) 
         className="composer__send"
         onClick={submit}
         disabled={disabled || !text.trim() || overLimit}
-        aria-label="Отправить сообщение"
-        title="Отправить (Enter)"
+        aria-label="Send message"
+        title="Send (Enter)"
       >
         <SendIcon />
       </button>

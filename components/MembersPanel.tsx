@@ -43,36 +43,36 @@ export default function MembersPanel({
   return (
     <>
       {onClose && (
-        <button type="button" className="icon-btn side__close" onClick={onClose} aria-label="Закрыть панель">
+        <button type="button" className="icon-btn side__close" onClick={onClose} aria-label="Close panel">
           <CloseIcon />
         </button>
       )}
 
       <div className="side__section side__invite">
-        <span className="side__label">Код чата</span>
+        <span className="side__label">Room code</span>
         <div className="side__code">{roomId}</div>
         <div className="side__actions">
           <button type="button" className="btn btn--secondary btn--sm" onClick={copy}>
             {copied ? <CheckIcon /> : <CopyIcon />}
-            {copied ? 'Скопировано' : 'Ссылка'}
+            {copied ? 'Copied' : 'Link'}
           </button>
           <button type="button" className="btn btn--secondary btn--sm" onClick={onShareInvite}>
             <ShareIcon />
-            Поделиться
+            Share
           </button>
         </div>
       </div>
 
       <div className="side__section side__members">
         <span className="side__label">
-          В чате · {total} {plural(total, ['участник', 'участника', 'участников'])}
+          In chat · {total} {plural(total, ['participant', 'participants'])}
         </span>
         <ul className="side__list">
           <li className="side__member side__member--self">
             <Avatar name={selfName} id="self" size={34} self />
             <div className="side__member-info">
               <span className="side__member-name">
-                {selfName} <em>это вы</em>
+                {selfName} <em>(you)</em>
               </span>
               <span className="side__member-fp">{selfFingerprint ?? '…'}</span>
             </div>
@@ -83,11 +83,11 @@ export default function MembersPanel({
               <div className="side__member-info">
                 <span className="side__member-name">{m.name}</span>
                 {m.secretTag !== ownSecretTag && (
-                  <span className="side__member-tagwarn" title="Секретная фраза комнаты не совпадает — сообщения не расшифруются">
-                    фраза не совпадает
+                  <span className="side__member-tagwarn" title="The room passphrase doesn't match — messages won't decrypt">
+                    passphrase mismatch
                   </span>
                 )}
-                <span className="side__member-fp" title="Отпечаток открытого ключа (SHA-256)">
+                <span className="side__member-fp" title="Public key fingerprint (SHA-256)">
                   {m.fingerprint}
                 </span>
               </div>
@@ -98,21 +98,21 @@ export default function MembersPanel({
 
       <div className="side__section side__info">
         <span className="side__label">
-          <LockIcon width={15} height={15} /> Как это защищено
+          <LockIcon width={15} height={15} /> How this is secured
         </span>
         <p>
-          Сообщения шифруются в браузере (ECDH P-256 + AES-256-GCM) отдельно для каждого участника.
-          Сервер лишь передаёт шифрованные пакеты и открытые ключи.
+          Messages are encrypted in the browser (ECDH P-256 + AES-256-GCM), separately for each
+          participant. The server merely relays encrypted packets and public keys.
         </p>
         <p>
-          Отпечатки ключей можно сверить с собеседником голосом или по другому каналу — так вы
-          убедитесь, что ключи никто не подменил.
+          You can compare key fingerprints with your contact out loud or over another channel —
+          that way you make sure nobody swapped the keys.
         </p>
-        <p>История переписки нигде не сохраняется и исчезает вместе с чатом.</p>
+        <p>The conversation history is stored nowhere and disappears together with the chat.</p>
       </div>
 
       <button type="button" className="btn btn--danger-outline side__leave" onClick={onLeave}>
-        <DoorIcon /> Покинуть чат
+        <DoorIcon /> Leave chat
       </button>
     </>
   );

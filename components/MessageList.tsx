@@ -14,7 +14,7 @@ interface MessageListProps {
 const GROUP_GAP_MS = 5 * 60_000;
 
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
 /** Лента: группировка сообщений одного автора, системные строки, автоскролл. */
@@ -59,13 +59,14 @@ export default function MessageList({ items, inviteUrl, onCopyInvite }: MessageL
             <span className="messages__empty-icon">
               <LockIcon width={30} height={30} />
             </span>
-            <h2>Это новый защищённый чат</h2>
+            <h2>This is a new secure chat</h2>
             <p>
-              Отправьте ссылку собеседникам — когда кто-то присоединится, открытые ключи обменяются
-              автоматически, и сообщения пойдут напрямую, минуя сервер в открытом виде.
+              Send the link to the people you want to talk to — as soon as someone joins, public
+              keys are exchanged automatically, and messages flow directly without ever reaching
+              the server in plaintext.
             </p>
             <button type="button" className="btn btn--secondary" onClick={onCopyInvite}>
-              <CopyIcon /> Скопировать ссылку-приглашение
+              <CopyIcon /> Copy invite link
             </button>
             <span className="messages__empty-url">{inviteUrl}</span>
           </div>
@@ -95,20 +96,20 @@ export default function MessageList({ items, inviteUrl, onCopyInvite }: MessageL
               <div className="msg__stack">
                 {firstOfGroup && (
                   <div className={`msg__meta msg__meta--${item.mine ? 'mine' : 'other'}`}>
-                    <span className="msg__author">{item.mine ? 'Вы' : item.senderName}</span>
+                    <span className="msg__author">{item.mine ? 'You' : item.senderName}</span>
                     <time>{formatTime(item.ts)}</time>
                   </div>
                 )}
                 {item.failed ? (
-                  <div className="msg__bubble msg__bubble--failed" title="Не удалось расшифровать сообщение">
-                    <WarnIcon /> Не удалось расшифровать сообщение
+                  <div className="msg__bubble msg__bubble--failed" title="Failed to decrypt the message">
+                    <WarnIcon /> Failed to decrypt the message
                   </div>
                 ) : (
                   <div className={`msg__bubble${item.unverified ? ' msg__bubble--unverified' : ''}`}>
                     {item.text}
                     {item.unverified && (
-                      <span className="msg__unverified" title="Подпись отправителя не прошла проверку">
-                        подпись не проверена
+                      <span className="msg__unverified" title="The sender's signature failed verification">
+                        signature unverified
                       </span>
                     )}
                   </div>
@@ -120,7 +121,7 @@ export default function MessageList({ items, inviteUrl, onCopyInvite }: MessageL
       </div>
 
       {!stickRef.current && (
-        <button type="button" className="messages__down" onClick={scrollToBottom} aria-label="Вниз к последним сообщениям">
+        <button type="button" className="messages__down" onClick={scrollToBottom} aria-label="Scroll down to the latest messages">
           <ChevronDownIcon />
           {unread > 0 && <span className="messages__down-badge">{unread > 99 ? '99+' : unread}</span>}
         </button>

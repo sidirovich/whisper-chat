@@ -18,7 +18,7 @@ export default function ConfirmModal({
   title,
   body,
   confirmLabel,
-  cancelLabel = 'Отмена',
+  cancelLabel = 'Cancel',
   danger,
   onConfirm,
   onCancel,

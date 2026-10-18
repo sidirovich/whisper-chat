@@ -12,7 +12,7 @@ interface EmojiPickerProps {
 }
 
 /**
- * Встроенный эмодзи-пикер: 8 категорий, поиск по-русски, «недавние».
+ * Встроенный эмодзи-пикер: 8 категорий, поиск по ключевым словам, «недавние».
  * Открытым остаётся пока пользователь не закроет — удобно вставлять несколько подряд.
  */
 export default function EmojiPicker({ anchorRef, onPick, onClose }: EmojiPickerProps) {
@@ -51,31 +51,31 @@ export default function EmojiPicker({ anchorRef, onPick, onClose }: EmojiPickerP
   };
 
   return (
-    <div className="ep" ref={panelRef} role="dialog" aria-label="Выбор эмодзи">
+    <div className="ep" ref={panelRef} role="dialog" aria-label="Emoji picker">
       <div className="ep__head">
         <SearchIcon className="ep__search-icon" />
         <input
           ref={searchRef}
           className="ep__search"
           type="text"
-          placeholder="Поиск: кот, огонь, ок…"
+          placeholder="Search: cat, fire, ok…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          aria-label="Поиск эмодзи"
+          aria-label="Search emoji"
         />
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть пикер эмодзи">
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close emoji picker">
           <CloseIcon />
         </button>
       </div>
 
       <div className="ep__body">
         {grid.length === 0 ? (
-          <p className="ep__empty">{query ? 'Ничего не найдено 🤷' : 'Пока пусто — выберите эмодзи, и он появится здесь'}</p>
+          <p className="ep__empty">{query ? 'Nothing found 🤷' : 'Nothing here yet — pick an emoji and it will show up here'}</p>
         ) : (
           <>
-            {!query && tab === 'recent' && <p className="ep__caption">Недавние</p>}
+            {!query && tab === 'recent' && <p className="ep__caption">Recent</p>}
             {!query && tab !== 'recent' && active && <p className="ep__caption">{active.label}</p>}
-            {query && <p className="ep__caption">Найдено: {found.length}</p>}
+            {query && <p className="ep__caption">Found: {found.length}</p>}
             <div className="ep__grid">
               {grid.map((emoji) => (
                 <button key={emoji} type="button" className="ep__cell" onClick={() => pick(emoji)}>
@@ -87,7 +87,7 @@ export default function EmojiPicker({ anchorRef, onPick, onClose }: EmojiPickerP
         )}
       </div>
 
-      <div className="ep__tabs" role="tablist" aria-label="Категории эмодзи">
+      <div className="ep__tabs" role="tablist" aria-label="Emoji categories">
         {recents.length > 0 && (
           <button
             type="button"

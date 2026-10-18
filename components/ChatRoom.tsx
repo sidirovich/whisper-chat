@@ -39,7 +39,7 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
   const shareInvite = useCallback(async () => {
     if (room && typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: `Чат ${room.roomId} в «Шёпоте»`, url: inviteUrl });
+        await navigator.share({ title: `Chat ${room.roomId} on Whisper`, url: inviteUrl });
         return;
       } catch {
         /* пользователь отменил — ничего не делаем */
@@ -64,9 +64,9 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
   const online = status === 'online';
   const typingLabel = (() => {
     if (typing.length === 0) return null;
-    if (typing.length === 1) return `${typing[0].name} печатает…`;
-    if (typing.length === 2) return `${typing[0].name} и ${typing[1].name} печатают…`;
-    return `${typing[0].name} и ещё ${typing.length - 1} печатают…`;
+    if (typing.length === 1) return `${typing[0].name} is typing…`;
+    if (typing.length === 2) return `${typing[0].name} and ${typing[1].name} are typing…`;
+    return `${typing[0].name} and ${typing.length - 1} others are typing…`;
   })();
 
   return (
@@ -96,7 +96,7 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
             type="button"
             className="icon-btn topbar__burger"
             onClick={() => setDrawerOpen(true)}
-            aria-label="Участники и настройки чата"
+            aria-label="Members and chat settings"
           >
             <MenuIcon />
           </button>
@@ -106,28 +106,28 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
               type="button"
               className="topbar__members"
               onClick={() => setDrawerOpen(true)}
-              aria-label={`Открыть список участников: ${total}`}
+              aria-label={`Open members list: ${total}`}
             >
               {members.length > 0 && <Avatar name={members[0].name} id={members[0].id} size={26} />}
               <span className="topbar__title">{room.roomId}</span>
               <span className="topbar__count">
                 <UsersIcon width={14} height={14} />
-                {total} {plural(total, ['участник', 'участника', 'участников'])}
+                {total} {plural(total, ['participant', 'participants'])}
               </span>
             </button>
           </div>
 
           <div className="topbar__right">
-            <span className="pill pill--lock" title="Сквозное шифрование AES-256-GCM">
+            <span className="pill pill--lock" title="End-to-end encryption AES-256-GCM">
               <LockIcon width={14} height={14} /> E2E
             </span>
             <span className={`pill pill--status${online ? ' is-online' : ' is-waiting'}`}>
               <i className="pill__dot" aria-hidden />
-              {online ? 'на связи' : 'переподключение…'}
+              {online ? 'online' : 'reconnecting…'}
             </span>
             {copied && (
               <span className="pill pill--copied" role="status">
-                ссылка скопирована
+                link copied
               </span>
             )}
           </div>
@@ -135,7 +135,7 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
 
         {status === 'reconnecting' && (
           <div className="chat__notice" role="status">
-            Связь с сервером потеряна — переподключаемся, чат восстановится автоматически.
+            Connection to the server lost — reconnecting; the chat will be restored automatically.
           </div>
         )}
 
@@ -143,7 +143,7 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
 
         {members.length === 0 && items.length > 0 && (
           <div className="chat__alone" role="status">
-            <span>Вы пока одни — отправьте ссылку собеседнику:</span>
+            <span>You're alone for now — send the link to someone:</span>
             <button type="button" className="btn btn--secondary btn--sm" onClick={() => void copyInvite()}>
               <CopyIcon /> {inviteUrl.replace(/^https?:\/\//, '')}
             </button>
@@ -159,9 +159,9 @@ export default function ChatRoom({ chat, onLeave }: ChatRoomProps) {
 
       <ConfirmModal
         open={confirmLeave}
-        title="Покинуть чат?"
-        body="Локальная переписка исчезнет, а на сервере её никогда и не было. Вернуться можно по ссылке-приглашению."
-        confirmLabel="Покинуть"
+        title="Leave the chat?"
+        body="The local conversation will disappear, and it never existed on the server. You can come back via the invite link."
+        confirmLabel="Leave"
         danger
         onConfirm={() => {
           setConfirmLeave(false);

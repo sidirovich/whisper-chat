@@ -162,7 +162,7 @@ export function useChat(): ChatApi {
             id: nextId(),
             kind: 'system',
             ts: Date.now(),
-            text: `⚠ У «${m.name}» ${tag ? 'другая' : 'нет'} секретной фразы комнаты${ownTag ? '' : ' (у вас она задана)'} — сообщения между вами не расшифруются. Выйдите из чата и войдите с одинаковой фразой.`,
+            text: `⚠ “${m.name}” ${tag ? 'has a different' : 'has no'} room passphrase${ownTag ? '' : ' (yours is set)'} — messages between you won't decrypt. Leave the chat and rejoin with the same passphrase.`,
             tone: 'warn',
           });
         }
@@ -177,7 +177,7 @@ export function useChat(): ChatApi {
               id: nextId(),
               kind: 'system',
               ts: Date.now(),
-              text: `⚠ Ключ участника «${m.name}» изменился — возможно, это другой человек. Сверьте отпечаток ${fingerprint} по другому каналу.`,
+              text: `⚠ The key of “${m.name}” has changed — this may be a different person. Verify the fingerprint ${fingerprint} over another channel.`,
               tone: 'warn',
             });
           }
@@ -253,7 +253,7 @@ export function useChat(): ChatApi {
         },
         (ack: JoinAck) => {
           if (!ack.ok) {
-            setError(ack.error ?? 'Не удалось восстановить подключение к чату');
+            setError(ack.error ?? 'Failed to restore the chat connection');
             return;
           }
           applyRoom({ ...r, selfId: ack.self!.id });
@@ -271,12 +271,12 @@ export function useChat(): ChatApi {
 
     const onMemberJoined = (m: MemberWire) => {
       addMembers([m]);
-      pushItem({ id: nextId(), kind: 'system', ts: Date.now(), text: `${m.name} присоединился к чату`, tone: 'join' });
+      pushItem({ id: nextId(), kind: 'system', ts: Date.now(), text: `${m.name} joined the chat`, tone: 'join' });
     };
 
     const onMemberLeft = ({ id, name }: { id: string; name: string }) => {
       removeMember(id);
-      pushItem({ id: nextId(), kind: 'system', ts: Date.now(), text: `${name} покинул чат`, tone: 'left' });
+      pushItem({ id: nextId(), kind: 'system', ts: Date.now(), text: `${name} left the chat`, tone: 'left' });
     };
 
     const onMessage = async (ev: IncomingMsgEvent) => {
@@ -290,7 +290,7 @@ export function useChat(): ChatApi {
           id: nextId(),
           kind: 'system',
           ts: Date.now(),
-          text: `Отброшено повторное или устаревшее сообщение от «${ev.fromName}»`,
+          text: `Dropped a replayed or outdated message from “${ev.fromName}”`,
           tone: 'warn',
         });
         return;
@@ -336,7 +336,7 @@ export function useChat(): ChatApi {
             id: nextId(),
             kind: 'system',
             ts: Date.now(),
-            text: `Сообщение от «${ev.fromName}» не расшифровано: у вас${ownTag ? ' другая' : ' не задана'} секретная фраза комнаты. Выйдите из чата и войдите с фразой, которую задал создатель.`,
+            text: `Message from “${ev.fromName}” was not decrypted: your room passphrase is ${ownTag ? 'different' : 'not set'}. Leave the chat and rejoin with the passphrase chosen by the creator.`,
             tone: 'warn',
           });
         } else if (roomSecretRef.current) {
@@ -344,7 +344,7 @@ export function useChat(): ChatApi {
             id: nextId(),
             kind: 'system',
             ts: Date.now(),
-            text: 'Не удалось расшифровать. Если это повторяется — проверьте секретную фразу комнаты.',
+            text: 'Failed to decrypt. If this keeps happening — check the room passphrase.',
             tone: 'warn',
           });
         }
@@ -380,7 +380,7 @@ export function useChat(): ChatApi {
     async (roomId: string, name: string, secret: string | null = null) => {
       setError(null);
       if (!identityRef.current) {
-        setError('Ключи ещё не готовы, попробуйте ещё раз');
+        setError('Keys are not ready yet, try again');
         return false;
       }
       const socket = getSocket();
@@ -395,7 +395,7 @@ export function useChat(): ChatApi {
       socket.connect();
       const ack = await new Promise<JoinAck>((resolve) => {
         const timer = window.setTimeout(
-          () => resolve({ ok: false, error: 'Сервер не отвечает. Убедитесь, что сервер запущен.' }),
+          () => resolve({ ok: false, error: 'The server is not responding. Make sure the server is running.' }),
           10_000,
         );
         socket.emit(
@@ -418,7 +418,7 @@ export function useChat(): ChatApi {
 
       if (!ack.ok || !ack.self) {
         setStatus('idle');
-        setError(ack.error ?? 'Не удалось войти в чат');
+        setError(ack.error ?? 'Failed to join the chat');
         return false;
       }
 
@@ -435,7 +435,7 @@ export function useChat(): ChatApi {
         id: nextId(),
         kind: 'system',
         ts: Date.now(),
-        text: `Вы в чате ${roomId} · сквозное шифрование и подписи активны${roomSecretRef.current ? ' · секретная фраза применена' : ''}`,
+        text: `You're in chat ${roomId} · end-to-end encryption and signatures are active${roomSecretRef.current ? ' · passphrase applied' : ''}`,
       });
       if (ack.members && ack.members.length > 0) {
         addMembers(ack.members);
@@ -443,10 +443,9 @@ export function useChat(): ChatApi {
           id: nextId(),
           kind: 'system',
           ts: Date.now(),
-          text: `Открытые ключи получены: ${ack.members.length} ${plural(ack.members.length, [
-            'участник',
-            'участника',
-            'участников',
+          text: `Public keys received: ${ack.members.length} ${plural(ack.members.length, [
+            'participant',
+            'participants',
           ])}`,
         });
       }
@@ -493,7 +492,7 @@ export function useChat(): ChatApi {
           );
           getSocket().emit('msg:send', { payloads });
         } catch {
-          pushItem({ id: nextId(), kind: 'system', ts: Date.now(), text: 'Не удалось зашифровать сообщение', tone: 'warn' });
+          pushItem({ id: nextId(), kind: 'system', ts: Date.now(), text: 'Failed to encrypt the message', tone: 'warn' });
         }
       })();
     },
@@ -541,14 +540,16 @@ export function makeRoomCode(): string {
   return [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
 }
 
-/** Словарь для генерации секретных фраз (запоминаемые, без спецсимволов). */
+/** Dictionary for generating passphrases (memorable, no special characters). */
 const PASS_WORDS = [
-  'альфа','банка','весна','гром','дельта','жемчуг','заря','игла','кабан','лошадь',
-  'мёд','нить','облако','парус','река','соль','тень','узел','флаг','холст',
-  'царь','чашка','шар','щит','экран','юг','якорь','атом','берег','винт',
-  'гнездо','дуб','ежевика','жираф','зубр','ирис','камень','лев','магнит','нора',
-  'остров','пик','руль','сталь','тропа','удар','фонарь','хвост','циркуль','чердак',
-  'шахта','щека','эхо','яблоня','азарт','бархат','вихрь','грань','дюна','ёлка',
+  'apple','anchor','aurora','beacon','bridge','canyon','cedar','cliff','cloud','comet',
+  'coral','cosmos','crane','crystal','dawn','delta','dune','eagle','ember','falcon',
+  'fern','flint','forest','fossil','gecko','gemini','giant','giraffe','granite','harbor',
+  'hazel','heron','island','ivory','jaguar','jasmine','jungle','koala','lagoon','lantern',
+  'lunar','maple','marble','meadow','meteor','mirage','nebula','nickel','north','oasis',
+  'onyx','orbit','otter','panda','pearl','pebble','penguin','phoenix','pilot','pine',
+  'quartz','quiver','raven','reef','ridge','river','rocket','saffron','sailor','summit',
+  'tundra','twilight','valley','velvet','vertex','violet','walnut','whisper','willow','zenith',
 ];
 
 /** Запоминаемая секретная фраза из 6 слов (~36 бит энтропии + энтропия кода комнаты). */
@@ -565,12 +566,7 @@ export function parseRoomCodeFromUrl(): string | null {
   return m ? m[0] : null;
 }
 
-/** Русская плюрализация: plural(3, ['участник','участника','участников']). */
-export function plural(n: number, forms: [string, string, string]): string {
-  const mod100 = n % 100;
-  const mod10 = n % 10;
-  if (mod100 >= 11 && mod100 <= 14) return forms[2];
-  if (mod10 === 1) return forms[0];
-  if (mod10 >= 2 && mod10 <= 4) return forms[1];
-  return forms[2];
+/** English plural: plural(3, ['participant', 'participants']). */
+export function plural(n: number, forms: [string, string]): string {
+  return n === 1 ? forms[0] : forms[1];
 }

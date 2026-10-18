@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Шёпот — защищённый чат',
+  title: 'Whisper — secure chat',
   description:
-    'Чат со сквозным шифрованием: сервер видит только шифрованные сообщения, ключи генерируются в браузере, история не хранится нигде.',
+    'End-to-end encrypted chat: the server only sees encrypted messages, keys are generated in the browser, and no history is stored anywhere.',
 };
 
 export const viewport: Viewport = {
@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );
